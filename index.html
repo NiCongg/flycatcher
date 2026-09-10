@@ -56,7 +56,7 @@
                      50%{opacity:.5;transform:translate(-50%,-50%) scale(1.06)}}
 
   #flock{position:absolute;inset:0;pointer-events:none;opacity:1;transition:opacity .9s ease}
-  #flock span{position:absolute;left:0;top:0;display:block;white-space:pre;
+  #flock span{position:absolute;left:0;top:0;display:block;white-space:pre;line-height:2.02;
     text-shadow:0 1px 5px rgba(0,0,0,.9),0 0 20px rgba(0,0,0,.65);will-change:transform,opacity}
   #probe{position:absolute;visibility:hidden;pointer-events:none;left:9%;right:9%}
   #probe .para{text-align:justify;text-justify:inter-ideograph;
@@ -112,7 +112,9 @@
     backdrop-filter:blur(3px);display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:3.2em;text-align:center;transition:opacity 1s ease;padding:0 10%}
   #intro p{font-size:clamp(19px,4.6vh,25px);line-height:2.1;color:rgba(240,243,238,.97);
-    letter-spacing:.06em;text-shadow:0 1px 10px rgba(0,0,0,.9)}
+    letter-spacing:.06em;text-shadow:0 1px 10px rgba(0,0,0,.9);margin:0}
+  #intro .sub{display:block;margin-top:1.35em;font-size:.66em;line-height:2.05;
+    letter-spacing:.12em;color:rgba(240,243,238,.74)}
   #enter{font:inherit;font-size:clamp(13px,3.2vh,15px);letter-spacing:.34em;text-indent:.34em;
     color:var(--sun);background:none;border:0;border-bottom:1px solid rgba(244,214,139,.4);
     padding:.5em .2em .45em;cursor:pointer;transition:color .5s,border-color .5s}
@@ -166,7 +168,7 @@
   <div id="toast"></div>
 
   <div id="intro">
-    <p id="introline">你能找出照片里的鸟么？<br>请打开声音</p>
+    <p id="introline">你能找出照片里的鸟么？<span class="sub">请打开声音<br>按住屏幕慢慢移动，松手确认</span></p>
     <button id="enter">开始</button>
   </div>
 
@@ -197,7 +199,7 @@ const stage=$("#stage"), scene=$("#scene"), photo=$("#photo"), marks=$("#marks")
       intro=$("#intro"), introline=$("#introline"), endCard=$("#end");
 
 const RM    = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const TOUCH = matchMedia("(hover: none)").matches;
+const TOUCH = matchMedia("(hover: none), (pointer: coarse)").matches;
 const AR = 2240/1260;
 
 let W=0,H=0, mode="boot", t0=0, chars=[], L=null, birds=[],
@@ -230,41 +232,110 @@ const CAPHTML = (fs,cn,sci,cr) =>
   '<i style="font-size:'+(fs*0.78).toFixed(1)+'px;font-style:italic;opacity:.6;letter-spacing:.06em;display:block;margin-top:.5em">'+sci+'</i>'+
   (cr ? '<span style="font-size:'+(fs*0.68).toFixed(1)+'px;opacity:.42;letter-spacing:.06em;display:block;margin-top:.55em">声音 © '+cr+'</span>' : '');
 
+
+/* ── typesetting done here, not by the browser ─────────────────────
+   the browser lays out a paragraph as one flow; asking it for the box
+   of every single glyph proved unreliable around line breaks, so the
+   line breaking, the kinsoku rules and the positions are all ours.   */
+const NO_START = "，。、；：！？）》」』】〉…—·”’%‰℃";   // may not open a line
+const NO_END   = "（《「『【〈“‘";                       // may not close one
+const LATIN    = /[A-Za-z0-9]/;
+
+let _ctx;
+function measurer(fs){
+  _ctx = _ctx || document.createElement("canvas").getContext("2d");
+  _ctx.font = fs + 'px QQSong,"Songti SC","Noto Serif SC",serif';
+  return _ctx;
+}
+
+function typeset(text, fs, maxW){
+  const ctx = measurer(fs), cs = [...text];
+  const cw  = cs.map(c => ctx.measureText(c).width);
+  const LS  = fs * 0.02;                       // a hair of tracking
+
+  // atomic units: latin words, 「——」, 「……」, otherwise one character
+  const units = [];
+  for (let i=0;i<cs.length;){
+    if (LATIN.test(cs[i])){
+      let j=i; while (j<cs.length && (LATIN.test(cs[j]) || cs[j]==="-" || cs[j]==="'")) j++;
+      units.push([...Array(j-i)].map((_,k)=>i+k)); i=j;
+    } else if (i+1<cs.length && cs[i]===cs[i+1] && (cs[i]==="—" || cs[i]==="…")){
+      units.push([i,i+1]); i+=2;
+    } else { units.push([i]); i++; }
+  }
+  const uw = units.map(u => u.reduce((s,k)=>s+cw[k],0));
+
+  // greedy fill, deciding the kinsoku carry at the moment of the break so a
+  // line can never end up wider than the measure
+  const lw = ln => ln.reduce((s,u)=>s+uw[u],0) + LS*Math.max(0,ln.length-1);
+  const lines = [[]];
+  for (let ui=0; ui<units.length; ui++){
+    const line = lines[lines.length-1];
+    if (cs[units[ui][0]] === " " && !line.length){        // no space opens a line
+      units[ui].forEach(k=>cw[k]=0); uw[ui]=0; line.push(ui); continue;
+    }
+    if (line.length && lw(line) + LS + uw[ui] > maxW){
+      const carry = [];
+      let nxt = ui;
+      for (let g=0; g<4; g++){
+        const fu = units[nxt];
+        const badStart = NO_START.indexOf(cs[fu[0]]) >= 0;
+        const lu = line.length ? units[line[line.length-1]] : null;
+        const badEnd = lu && NO_END.indexOf(cs[lu[lu.length-1]]) >= 0;
+        if ((badStart || badEnd) && line.length > 1){ carry.unshift(line.pop()); nxt = carry[0]; }
+        else break;
+      }
+      lines.push(carry.concat([ui]));
+    } else line.push(ui);
+  }
+
+  const lineH = fs * 2.02;
+  const pos = new Array(cs.length);
+  lines.forEach((line,li) => {
+    let px = 0;
+    line.forEach(ui => {
+      units[ui].forEach(ci => { pos[ci] = {x:px, y:li*lineH}; px += cw[ci]; });
+      px += LS;
+    });
+  });
+  return {pos, lines: lines.length, lineH, height: lines.length*lineH};
+}
+
+let PARA = null;
+
 function measure(){
   const r = stage.getBoundingClientRect();
   W = r.width; H = r.height;
 
   const [lo,hi] = L.textBand;
   const bandTop = lo*H, bandH = (hi-lo)*H;
-  const inner  = W*0.82;
+  const inner   = W*0.82;
 
   const FMAX = Math.min(W*0.043, 20), FMIN = Math.min(W*0.034, 15);
-  let fs = FMAX, best = FMIN;
-  for (fs = FMAX; fs >= FMIN; fs -= 0.4){
-    probe.style.fontSize = fs+"px";
-    probe.innerHTML =
-      '<div class="cap">'+CAPHTML(fs,"x","x","x")+'</div>' +
-      '<div class="para" style="line-height:2.02;margin-top:'+(fs*0.9)+'px">'+L.text+'</div>';
-    if (probe.offsetHeight <= bandH*0.86){ best = fs; break; }
+  let fs = FMIN, lay = null, capH = 0;
+  for (let f = FMAX; f >= FMIN; f -= 0.4){
+    probe.style.fontSize = f+"px";
+    probe.innerHTML = '<div class="cap">'+CAPHTML(f,"x","x",null)+'</div>';
+    const ch = probe.offsetHeight;
+    const tl = typeset(L.text, f, inner);
+    if (ch + f*0.9 + tl.height <= bandH*0.86 || f - 0.4 < FMIN){
+      fs = f; lay = tl; capH = ch; break;
+    }
   }
-  fs = best;
   probe.style.fontSize = fs+"px";
-  probe.innerHTML =
-    '<div class="cap">'+CAPHTML(fs,L.cn,L.sci,null)+'</div>' +
-    '<div class="para" style="line-height:2.02;margin-top:'+(fs*0.9)+'px"></div>';
-  probe.querySelector(".para").textContent = joined(L.text);
-
-  const top = bandTop + Math.max(0,(bandH - probe.offsetHeight))/2;
+  probe.innerHTML = '<div class="cap">'+CAPHTML(fs,L.cn,L.sci,null)+'</div>';
+  capH = probe.offsetHeight;
+  const total = capH + fs*0.9 + lay.height;
+  const top   = bandTop + Math.max(0,(bandH - total))/2;
   probe.style.top = top+"px";
 
-  const sr = stage.getBoundingClientRect();
-  const cr = probe.querySelector(".cap").getBoundingClientRect();
-  capRect = {top: cr.top - sr.top};
-  cap.style.top = capRect.top+"px";
+  cap.style.top = top+"px";
   cap.dataset.fs = fs;
 
+  PARA = {left: W*0.09, top: top + capH + fs*0.9, lay};
+
   scrim.style.top    = Math.max(0, top - fs*4)+"px";
-  scrim.style.height = (probe.offsetHeight + fs*8)+"px";
+  scrim.style.height = (total + fs*8)+"px";
   scrim.style.background =
     "linear-gradient(to bottom,rgba(4,9,6,0) 0%,rgba(4,9,6,.9) 22%,rgba(4,9,6,.9) 78%,rgba(4,9,6,0) 100%)";
 
@@ -273,29 +344,17 @@ function measure(){
 
 function build(){
   const fs = measure();
-  const sr = stage.getBoundingClientRect();
   flock.innerHTML = ""; chars = [];
-  const node = probe.querySelector(".para").firstChild;
-  const rng  = document.createRange();
-  const disp = node.textContent;
-  const boxes = [];
-  for (let i=0;i<disp.length;i++){
-    if (disp[i] === WJ) continue;                  // invisible, no glyph of its own
-    rng.setStart(node,i); rng.setEnd(node,i+1);
-    // a character on a wrap point returns a zero-width rect left over on the
-    // previous line plus the real one; take the last rect that has width
-    const rl = rng.getClientRects();
-    let r = null;
-    for (let j=0;j<rl.length;j++) if (rl[j].width > 0.5) r = rl[j];
-    boxes.push([disp[i], r || rng.getBoundingClientRect()]);
-  }
-  boxes.forEach(([ch,b],i) => {
+  const cs = [...L.text];
+  cs.forEach((ch,i) => {
+    const p = PARA.lay.pos[i];
+    if (!p) return;
     const s = document.createElement("span");
     s.textContent = ch;
     s.style.fontSize = fs+"px";
     flock.appendChild(s);
     chars.push({
-      el:s, tx:b.left-sr.left, ty:b.top-sr.top,
+      el:s, tx:PARA.left+p.x, ty:PARA.top+p.y,
       x:Math.random()*W, y:Math.random()*H,
       vx:(Math.random()-.5)*.9, vy:(Math.random()-.5)*.9,
       ph:Math.random()*6.28, sp:.55+Math.random()*.75,
@@ -604,8 +663,8 @@ function load(key){
   scene.style.transformOrigin = (birds[0].x*100)+"% "+(birds[0].y*100)+"%";
   vign.style.background =
     `radial-gradient(circle at ${birds[0].x*100}% ${birds[0].y*100}%,rgba(0,0,0,0) 0%,rgba(0,0,0,0) 11%,rgba(3,7,5,.6) 44%,rgba(3,7,5,.9) 76%)`;
-  introline.innerHTML = "你能找出照片里的鸟么？<br>请打开声音";
-  if (TOUCH) introline.innerHTML += "<br>按住屏幕慢慢移动，松手确认";
+  introline.innerHTML = '你能找出照片里的鸟么？<span class="sub">请打开声音'
+    + "<br>按住屏幕慢慢移动，松手确认</span>";
   L.cu = CLOSEUP[key] || null;
   spot.style.backgroundImage    = "url("+(L.cu || SRC[key])+")";
   spot.style.backgroundSize     = L.cu ? "auto" : "cover";
