@@ -23,7 +23,8 @@
     font-weight:400;font-style:normal;font-display:block}
   :root{ --ink:#e8ebe6; --dim:rgba(232,235,230,.5); --sun:#f4d68b; --deep:#050a07; }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{height:100%;overflow:hidden;background:var(--deep)}
+  html,body{height:100%;overflow:hidden;background:var(--deep);
+    -webkit-text-size-adjust:100%;text-size-adjust:100%}
   body{
     font-family:QQSong,"Songti SC","Noto Serif SC","Hiragino Mincho ProN",serif;
     color:var(--ink);display:flex;align-items:center;justify-content:center;
@@ -110,12 +111,14 @@
 
   #intro{position:absolute;inset:0;z-index:9;background:linear-gradient(rgba(4,9,6,.52),rgba(4,9,6,.88));
     backdrop-filter:blur(3px);display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:3.2em;text-align:center;transition:opacity 1s ease;padding:0 10%}
+    gap:0;text-align:center;transition:opacity 1s ease;padding:0 10%}
   #intro p{font-size:clamp(19px,4.6vh,25px);line-height:2.1;color:rgba(240,243,238,.97);
     letter-spacing:.06em;text-shadow:0 1px 10px rgba(0,0,0,.9);margin:0}
-  #intro .sub{display:block;margin-top:1.35em;font-size:.66em;line-height:2.05;
-    letter-spacing:.12em;color:rgba(240,243,238,.74)}
-  #enter{font:inherit;font-size:clamp(13px,3.2vh,15px);letter-spacing:.34em;text-indent:.34em;
+  #intro .sub{display:block;margin-top:1.6em;font-size:clamp(12px,2.9vh,14px);
+    line-height:2.1;letter-spacing:.1em;color:rgba(240,243,238,.74)}
+  #enter{position:absolute;left:50%;transform:translateX(-50%);
+    bottom:max(15vh,env(safe-area-inset-bottom));
+    font:inherit;font-size:clamp(13px,3.2vh,15px);letter-spacing:.34em;text-indent:.34em;
     color:var(--sun);background:none;border:0;border-bottom:1px solid rgba(244,214,139,.4);
     padding:.5em .2em .45em;cursor:pointer;transition:color .5s,border-color .5s}
   #enter:hover{color:#fff0c4;border-color:var(--sun)}
@@ -248,6 +251,25 @@ function measurer(fs){
   return _ctx;
 }
 
+/* Some mobile browsers still inflate text despite text-size-adjust. Canvas
+   measurement never is, so DOM and layout would drift apart. Measure a real
+   glyph once and carry the ratio into the type size. */
+let INFLATE = 1;
+function checkInflate(fs){
+  const p = document.createElement("span");
+  p.textContent = "国国国国国国国国国国";
+  p.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;"
+                  + "font-size:"+fs+"px;line-height:1";
+  document.body.appendChild(p);
+  const dom = p.getBoundingClientRect().width;
+  document.body.removeChild(p);
+  const cvs = measurer(fs).measureText("国国国国国国国国国国").width;
+  INFLATE = (dom > 0 && cvs > 0) ? dom/cvs : 1;
+  if (INFLATE < 0.9 || INFLATE > 1.6) INFLATE = 1;      // nonsense reading, ignore
+  if (DEBUG) ping("文字缩放比 " + INFLATE.toFixed(3));
+  return INFLATE;
+}
+
 function typeset(text, fs, maxW){
   const ctx = measurer(fs), cs = [...text];
   const cw  = cs.map(c => ctx.measureText(c).width);
@@ -344,6 +366,7 @@ function measure(){
 
 function build(){
   const fs = measure();
+  const drawFs = fs / INFLATE;              // so rendered glyphs match the layout
   flock.innerHTML = ""; chars = [];
   const cs = [...L.text];
   cs.forEach((ch,i) => {
@@ -351,7 +374,7 @@ function build(){
     if (!p) return;
     const s = document.createElement("span");
     s.textContent = ch;
-    s.style.fontSize = fs+"px";
+    s.style.fontSize = drawFs+"px";
     flock.appendChild(s);
     chars.push({
       el:s, tx:PARA.left+p.x, ty:PARA.top+p.y,
@@ -863,8 +886,10 @@ let rz; addEventListener("resize",()=>{ clearTimeout(rz); rz=setTimeout(()=>{
 },220); });
 
 (async () => {
+  checkInflate(16);
   await load(pick());
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(build);
+  if (document.fonts && document.fonts.ready)
+    document.fonts.ready.then(()=>{ checkInflate(16); build(); });
   requestAnimationFrame(frame);
 })();
 })();
