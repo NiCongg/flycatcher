@@ -110,7 +110,7 @@
 
   #intro{position:absolute;inset:0;z-index:9;background:linear-gradient(rgba(4,9,6,.52),rgba(4,9,6,.88));
     backdrop-filter:blur(3px);display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:2.8em;text-align:center;transition:opacity 1s ease;padding:0 10%}
+    gap:3.2em;text-align:center;transition:opacity 1s ease;padding:0 10%}
   #intro p{font-size:clamp(19px,4.6vh,25px);line-height:2.1;color:rgba(240,243,238,.97);
     letter-spacing:.06em;text-shadow:0 1px 10px rgba(0,0,0,.9)}
   #enter{font:inherit;font-size:clamp(13px,3.2vh,15px);letter-spacing:.34em;text-indent:.34em;
@@ -282,7 +282,12 @@ function build(){
   for (let i=0;i<disp.length;i++){
     if (disp[i] === WJ) continue;                  // invisible, no glyph of its own
     rng.setStart(node,i); rng.setEnd(node,i+1);
-    boxes.push([disp[i], rng.getBoundingClientRect()]);
+    // a character on a wrap point returns a zero-width rect left over on the
+    // previous line plus the real one; take the last rect that has width
+    const rl = rng.getClientRects();
+    let r = null;
+    for (let j=0;j<rl.length;j++) if (rl[j].width > 0.5) r = rl[j];
+    boxes.push([disp[i], r || rng.getBoundingClientRect()]);
   }
   boxes.forEach(([ch,b],i) => {
     const s = document.createElement("span");
@@ -600,7 +605,7 @@ function load(key){
   vign.style.background =
     `radial-gradient(circle at ${birds[0].x*100}% ${birds[0].y*100}%,rgba(0,0,0,0) 0%,rgba(0,0,0,0) 11%,rgba(3,7,5,.6) 44%,rgba(3,7,5,.9) 76%)`;
   introline.innerHTML = "你能找出照片里的鸟么？<br>请打开声音";
-  if (TOUCH) introline.innerHTML += '<br><span style="font-size:.8em;opacity:.72">按住屏幕慢慢移动，松手确认</span>';
+  if (TOUCH) introline.innerHTML += "<br>按住屏幕慢慢移动，松手确认";
   L.cu = CLOSEUP[key] || null;
   spot.style.backgroundImage    = "url("+(L.cu || SRC[key])+")";
   spot.style.backgroundSize     = L.cu ? "auto" : "cover";
